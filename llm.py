@@ -13,6 +13,7 @@ https://aistudio.google.com/apikey).
 import os
 import json
 import logging
+import time
 import requests
 
 log = logging.getLogger("lcd.llm")
@@ -67,7 +68,7 @@ def _build_context_block(context: dict) -> str:
 def ask_lcd(user_message: str, context: dict) -> dict:
     """
     Calls Gemini and returns a parsed dict: {"reply": str, "action": {...}}
-    Falls back to a safe default if parsing fails.
+    Retries a couple of times on a transient 503 before giving up.
     """
     if not GEMINI_API_KEY:
         raise RuntimeError(
@@ -86,15 +87,23 @@ def ask_lcd(user_message: str, context: dict) -> dict:
         },
     }
 
-    resp = requests.post(
-        GEMINI_URL,
-        json=payload,
-        headers={
-            "x-goog-api-key": GEMINI_API_KEY,
-            "Content-Type": "application/json",
-        },
-        timeout=20,
-    )
+    resp = None
+    for attempt in range(3):
+        resp = requests.post(
+            GEMINI_URL,
+            json=payload,
+            headers={
+                "x-goog-api-key": GEMINI_API_KEY,
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
+        if resp.status_code == 503 and attempt < 2:
+            log.warning("Gemini returned 503, retrying (attempt %d)...", attempt + 1)
+            time.sleep(2)
+            continue
+        break
+
     resp.raise_for_status()
     data = resp.json()
 

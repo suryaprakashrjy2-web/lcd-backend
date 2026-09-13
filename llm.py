@@ -18,10 +18,10 @@ import requests
 log = logging.getLogger("lcd.llm")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-2.0-flash"  # fast + free-tier friendly
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    f"{GEMINI_MODEL}:generateContent"
 )
 
 SYSTEM_PROMPT = """You are LCD, a personal voice assistant for a single user, similar to \
@@ -86,7 +86,15 @@ def ask_lcd(user_message: str, context: dict) -> dict:
         },
     }
 
-    resp = requests.post(GEMINI_URL, json=payload, timeout=20)
+    resp = requests.post(
+        GEMINI_URL,
+        json=payload,
+        headers={
+            "x-goog-api-key": GEMINI_API_KEY,
+            "Content-Type": "application/json",
+        },
+        timeout=20,
+    )
     resp.raise_for_status()
     data = resp.json()
 
@@ -99,7 +107,6 @@ def ask_lcd(user_message: str, context: dict) -> dict:
         log.warning("Failed to parse Gemini JSON output, raw text was: %s", raw_text)
         parsed = {"reply": raw_text, "action": {"type": "none"}}
 
-    # Ensure the shape is always well-formed for the Android app.
     parsed.setdefault("reply", "")
     action = parsed.setdefault("action", {})
     action.setdefault("type", "none")

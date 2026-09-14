@@ -13,6 +13,7 @@ https://aistudio.google.com/apikey).
 import os
 import json
 import logging
+import re
 import time
 import requests
 
@@ -90,7 +91,7 @@ def ask_lcd(user_message: str, context: dict) -> dict:
         "contents": [{"parts": [{"text": full_prompt}]}],
         "generationConfig": {
             "temperature": 0.4,
-            "maxOutputTokens": 300,
+            "maxOutputTokens": 800,
         },
     }
 
@@ -139,7 +140,18 @@ def ask_lcd(user_message: str, context: dict) -> dict:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
         log.warning("Failed to parse Gemini JSON output, raw text was: %s", raw_text)
-        parsed = {"reply": raw_text, "action": {"type": "none"}}
+        # Response was likely cut off mid-JSON (hit maxOutputTokens). Try to
+        # salvage just the "reply" field's text so we still speak something
+        # sensible instead of the broken JSON string itself.
+        match = re.search(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)', cleaned)
+        if match:
+            salvaged = match.group(1).encode().decode("unicode_escape", errors="ignore")
+            parsed = {"reply": salvaged, "action": {"type": "none"}}
+        else:
+            parsed = {
+                "reply": "క్షమించండి, నాకు సరిగ్గా అర్థం కాలేదు. మళ్ళీ చెప్పగలరా?",
+                "action": {"type": "none"},
+            }
 
     parsed.setdefault("reply", "")
     action = parsed.setdefault("action", {})

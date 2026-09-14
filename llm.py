@@ -65,10 +65,17 @@ def _build_context_block(context: dict) -> str:
     return "\n".join(lines) if lines else "No relevant saved data found."
 
 
+def _fallback(reply: str) -> dict:
+    """Same shape ask_lcd always returns, used for graceful error replies."""
+    return {"reply": reply, "action": {"type": "none", "target": "", "message": ""}}
+
+
 def ask_lcd(user_message: str, context: dict) -> dict:
     """
     Calls Gemini and returns a parsed dict: {"reply": str, "action": {...}}
     Retries a couple of times on a transient 503 before giving up.
+    Network/timeout failures return a friendly fallback dict instead of raising,
+    so a slow or unreachable Gemini call never turns into a 500 in app.py.
     """
     if not GEMINI_API_KEY:
         raise RuntimeError(
@@ -88,23 +95,41 @@ def ask_lcd(user_message: str, context: dict) -> dict:
     }
 
     resp = None
-    for attempt in range(3):
-        resp = requests.post(
-            GEMINI_URL,
-            json=payload,
-            headers={
-                "x-goog-api-key": GEMINI_API_KEY,
-                "Content-Type": "application/json",
-            },
-            timeout=20,
-        )
-        if resp.status_code == 503 and attempt < 2:
-            log.warning("Gemini returned 503, retrying (attempt %d)...", attempt + 1)
-            time.sleep(2)
-            continue
-        break
+    try:
+        for attempt in range(3):
+            resp = requests.post(
+                GEMINI_URL,
+                json=payload,
+                headers={
+                    "x-goog-api-key": GEMINI_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                timeout=45,
+            )
+            if resp.status_code == 503 and attempt < 2:
+                log.warning("Gemini returned 503, retrying (attempt %d)...", attempt + 1)
+                time.sleep(2)
+                continue
+            break
 
-    resp.raise_for_status()
+        resp.raise_for_status()
+
+    except requests.exceptions.ReadTimeout:
+        log.warning("Gemini request timed out after 45s")
+        return _fallback("Sorry, that took too long to respond. Try again?")
+
+    except requests.exceptions.ConnectionError:
+        log.warning("Could not connect to Gemini")
+        return _fallback("Couldn't reach the AI service right now. Try again in a bit.")
+
+    except requests.exceptions.HTTPError:
+        log.warning("Gemini returned HTTP error %s", resp.status_code if resp is not None else "?")
+        return _fallback("AI service returned an error. Try again?")
+
+    except requests.exceptions.RequestException as e:
+        log.warning("Gemini request failed: %s", e)
+        return _fallback("Something went wrong talking to Gemini. Try again?")
+
     data = resp.json()
 
     raw_text = data["candidates"][0]["content"]["parts"][0]["text"]

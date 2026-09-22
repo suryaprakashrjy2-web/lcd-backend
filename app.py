@@ -7,7 +7,7 @@ Flow:
   Phone (Android app) does Speech-to-Text on-device (Telugu) ->
   sends plain text to this server's /chat endpoint ->
   server looks up relevant info (contacts, notes) via RAG ->
-  server calls Gemini LLM to generate a reply + decide an action ->
+  server calls the LLM to generate a reply + decide an action ->
   server returns JSON { reply, action } ->
   Phone speaks "reply" using on-device Text-to-Speech (Telugu) and executes "action".
 
@@ -39,6 +39,13 @@ app = Flask(__name__)
 
 # One shared RAG store instance (loads/persists to local ./chroma_data folder)
 rag_store = RAGStore()
+
+
+@app.route("/", methods=["GET"])
+def root():
+    """Bare root path - Render (or other pingers/bots) sometimes hit this
+    directly instead of /health. Avoids a noisy 404 in the logs."""
+    return jsonify({"status": "ok", "service": "lcd-backend"}), 200
 
 
 @app.route("/health", methods=["GET"])
@@ -76,7 +83,7 @@ def chat():
     # 1. Pull any relevant context (contacts, saved notes) from RAG store
     context = rag_store.query(user_message)
 
-    # 2. Ask Gemini for a reply + structured action
+    # 2. Ask the LLM for a reply + structured action
     try:
         result = ask_lcd(user_message, context)
     except Exception as exc:  # noqa: BLE001 - want to always return JSON to the app
